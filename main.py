@@ -30,7 +30,7 @@ async def ai_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
     now = datetime.now()
     rate[user_id] = [t for t in rate[user_id] if now - t < timedelta(seconds=30)]
     if len(rate[user_id]) >= 3:
-        await update.message.reply_text("⏳ 3/30s")
+        await update.message.reply_text("3/30s")
         return
     rate[user_id].append(now)
 
@@ -41,38 +41,29 @@ async def ai_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
 
     msg = await update.message.reply_text("Thinking...")
 
-        try:
-        # Ask for full answer in ONE call – NO streaming edits
+    try:
+        # FORCE SHORT BUT COMPLETE ANSWER
         response = await asyncio.wait_for(
             client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "system", "content": "Answer fully but keep under 800 tokens."}] 
-                         + memory[chat_id][-5:],
+                messages=[
+                    {"role": "system", "content": "Give a COMPLETE answer in 4–6 short bullet points. Never cut off."},
+                    *memory[chat_id][-5:]
+                ],
                 temperature=0.7,
-                max_tokens=900
+                max_tokens=500
             ),
-            timeout=18
+            timeout=15
         )
         answer = response.choices[0].message.content.strip()
 
-        # Send ONE clean message – no mid-edits = no cutoff
-        await msg.edit_text(answer or "No reply.")
+        # ONE clean message + tiny sleep so Render doesn't kill it
+        await asyncio.sleep(0.5)
+        await msg.edit_text(answer)
         memory[chat_id].append({"role": "assistant", "content": answer})
 
     except Exception as e:
         await msg.edit_text("AI busy, try again.")
-
-    # DM
-    if chat.type == "private" and text.strip():
-        await ai_reply(update, context, text, chat.id)
-        return
-
-    # Group mention
-    me = await context.bot.get_me()
-    if f"@{me.username}" in text.lower():
-        clean = text.replace(f"@{me.username}", "", 1).strip()
-        if clean:
-            await ai_reply(update, context, clean, chat.id)
 
 # === APP ===
 app = Application.builder().token(BOT_TOKEN).build()
