@@ -1,40 +1,53 @@
 import os
+import asyncio
+from collections import defaultdict  # ← FIXED: ADD THIS
+from datetime import datetime, timedelta
 
 from telegram import Update
-from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
-from openai import OpenAI
+from telegram.ext import Application, ContextTypes, MessageHandler, CommandHandler, filters
+from openai import AsyncOpenAI
 
+# === CONFIG ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", 10000))
 
-client = OpenAI(api_key=OPENAI_KEY)
+client = AsyncOpenAI(api_key=OPENAI_KEY)
 
+# === MEMORY & RATE LIMIT ===
 memory = defaultdict(list)
+rate = defaultdict(list)
 
 async def ai_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, chat_id: int):
-    # Check for "who made you"
-    if "who made you" in text.lower() or "who created you" in text.lower():
-        await update.message.reply_text("I was made by Engineer Biruk, an Ethiopian innovator.")
+    user_id = update.effective_user.id
+    now = datetime.now()
+    rate[user_id] = [t for t in rate[user_id] if now - t < timedelta(seconds=30)]
+    if len(rate[user_id]) >= 3:
+        await update.message.reply_text("3/30s")
         return
+    rate[user_id].append(now)
 
     memory[chat_id].append({"role": "user", "content": text})
-    if len(memory[chat_id]) > 5:
-        memory[chat_id] = memory[chat_id][-5:]
+    if len(memory[chat_id]) > 10:
+        memory[chat_id] = memory[chat_id][-10:]
 
     msg = await update.message.reply_text("Thinking...")
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are SuccessMind AI by Engineer Biruk — a motivational business man, chess master, athlete, and handsome leader like Alexander the Great. Give positive, inspiring vibes with Ethiopian pride. Short bullet points."}
-            ] + memory[chat_id],
-            temperature=0.7,
-            max_tokens=400
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Answer fully in 4-7 short bullet points. Never cut off."}
+                ] + memory[chat_id][-5:],
+                temperature=0.7,
+                max_tokens=600
+            ),
+            timeout=16
         )
         answer = response.choices[0].message.content.strip()
+        await asyncio.sleep(0.5)
         await msg.edit_text(answer or "No reply.")
         memory[chat_id].append({"role": "assistant", "content": answer})
     except:
@@ -42,11 +55,13 @@ async def ai_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "*SuccessMind AI by Engineer Biruk*\n\n"
-        "• DM: Full chat\n"
-        "• Group: Mention me or /ask\n"
-        "• Made in Ethiopia 🇪🇹 with pride\n\n"
-        "Welcome! I'm SuccessMind AI — your motivational guide to success. Ask me anything, and I'll inspire you like a business titan, chess master, athlete, and handsome leader. Let's conquer together!",
+        "*SuccessMind AI*\n\n"
+        "• DM: Full chat support\n"
+        "• Group: Mention me (@NVAaichat_bot) or use /ask\n"
+        "• Made in Ethiopia\n\n"
+        "Welcome! I’m NovaAI — your intelligent assistant.\n"
+        "Ask me anything, and I’ll give you clear, fast, and helpful answers.\n\n"
+        "Start typing whenever you’re ready.",
         parse_mode="Markdown"
     )
 
